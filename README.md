@@ -13,7 +13,7 @@ Example:
 Then you can use that .TAP file in your favourite emulator:
 
   1. attach the tape
-  2. run `LOAD"*",8,1:RUN"`
+  2. run `LOAD"*",8,1:RUN`
 
 All PRG files are added as non-relocatable programs. Run the
 tool with `-h` flag for help.
