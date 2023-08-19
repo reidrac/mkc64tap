@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """
 Copyright (C) 2017 by Juan J. Martinez <jjm@usebox.net>
+Modified  (C) 2023 by Zibri <zibri@zibri.org>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +26,7 @@ import sys
 import struct
 from argparse import ArgumentParser
 
-__version__ = "0.1"
+__version__ = "0.2"
 
 DEF_OUTPUT = "output.tap"
 
@@ -37,7 +38,7 @@ PULSE_L = 0x56
 def write_header(fd, data_len):
     """Write the TAP header"""
     fd.write(b"C64-TAPE-RAW")
-    fd.write(b"\0") # version
+    fd.write(b"\1") # version 1
     fd.write(b"\0\0\0") # reserved
     fd.write(struct.pack("<I", data_len))
 
@@ -75,6 +76,7 @@ def make_header(t, addr_start, addr_end, filename):
     header.extend(bytearray(struct.pack("<H", addr_start)))
     header.extend(bytearray(struct.pack("<H", addr_end)))
     header.extend(petscii(filename[:16]))
+
     if len(filename) < 16:
         header.extend(map(ord, " " * (16 - len(filename))))
     # body
@@ -123,15 +125,13 @@ def make_end_of_tape():
 def read_file(filename):
     """Read a file (PRG) and return it encoded as TAP blocks"""
     with open(filename, "rb") as fd:
-        data = fd.read()
+        data = bytearray(fd.read())
 
     addr_start = struct.unpack("<H", data[:2])[0]
     data = data[2:]
     addr_end = addr_start + len(data) + 1
 
-    data = map(ord, data)
-
-    encoded = []
+    encoded = [0x00,0x14,0x00,0x05]
 
     # leader
     for _ in range(0x6a00):
@@ -141,7 +141,7 @@ def read_file(filename):
     encoded.extend(encbytes([x for x in range(0x89, 0x80, -1)]))
 
     # header
-    header = make_header(3, addr_start, addr_end, filename.rstrip(".prg"))
+    header = make_header(3, addr_start, addr_end, filename[0:filename.index(".")])
     encoded.extend(encbytes(header))
 
     # end of data
@@ -160,8 +160,14 @@ def read_file(filename):
     # end of data
     encoded.extend([PULSE_L, PULSE_S])
 
+    # gap
+    for _ in range(0x4e):
+        encoded.append(PULSE_S)
+
     # trailer
-    for _ in range(0x388):
+    encoded.extend([0x00,0x14,0x00,0x05])
+
+    for _ in range(0x1500):
         encoded.append(PULSE_S)
 
     # data sync
@@ -172,8 +178,8 @@ def read_file(filename):
     for c in data:
         checkbyte ^= c
 
-    data.append(checkbyte)
     encoded.extend(encbytes(data))
+    encoded.extend(encbytes([checkbyte]))
 
     # end of data
     encoded.extend([PULSE_L, PULSE_S])
@@ -186,7 +192,12 @@ def read_file(filename):
     encoded.extend(encbytes([x for x in range(9, 0, -1)]))
 
     # data (REP)
+    checkbyte = 0
+    for c in data:
+        checkbyte ^= c
+
     encoded.extend(encbytes(data))
+    encoded.extend(encbytes([checkbyte]))
 
     # end of data
     encoded.extend([PULSE_L, PULSE_S])
@@ -217,21 +228,16 @@ def main():
 
     args = parser.parse_args()
 
-    try:
-        data = []
-        for filename in args.file:
-            data.extend(read_file(filename))
+    data = []
+    for filename in args.file:
+        data.extend(read_file(filename))
 
-        with open(args.output, "wb") as fd:
-            write_header(fd, len(data))
-            fd.write(bytearray(data))
-            fd.write(bytearray(make_end_of_tape()))
-    except Exception as ex:
-        print "ERROR: %s" % ex
-        sys.exit(1)
+    with open(args.output, "wb") as fd:
+        write_header(fd, len(data))
+        fd.write(bytearray(data))
+        fd.write(bytearray(make_end_of_tape()))
 
     sys.exit(0)
 
 if __name__ == "__main__":
     main()
-
